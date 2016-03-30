@@ -12,6 +12,8 @@ public:
     ParentDB();
     virtual ~ParentDB();
 
+    void loadRating(const std::string &id="");
+    void OfferRatingLoad(mongo::Query=mongo::Query());
     void OfferLoad(mongo::Query, mongo::BSONObj &camp);
     void OfferRemove(const std::string &id);
     void CampaignLoad(const std::string &campaignId = std::string());

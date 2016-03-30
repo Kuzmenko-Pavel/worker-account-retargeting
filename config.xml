@@ -4,17 +4,17 @@
 <server>
     <!--IP сервера. Ссылка на редирект по рекламному предложению содержит в себе адрес сервера, который её создал-->
     <ip>212.113.34.134</ip>
-    <lock_file>/run/workerd/lockr</lock_file>
-    <pid_file>/run/workerd/pidr</pid_file>
+    <lock_file>/run/workerd/lockra</lock_file>
+    <pid_file>/run/workerd/pidra</pid_file>
     <user>www-data</user>
     <group>www-data</group>
     <!--путь к файлу сокета-->
-    <socket_path>/run/workerd/sockr</socket_path>
+    <socket_path>/run/workerd/sockra</socket_path>
     <!--количество ниток-->
     <children>1</children>
 
     <!--путь к очереди сообщений-->
-    <mq_path>guest:guest@localhost//</mq_path>
+    <mq_path>worker:worker@rg.yottos.com/worker</mq_path>
 
     <!--путь к фалу базы данных sqlite или :memory:-->
     <sqlite>
