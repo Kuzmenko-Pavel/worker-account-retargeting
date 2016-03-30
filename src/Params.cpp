@@ -95,9 +95,9 @@ Params &Params::parse()
     }
 
 
-    if (params_.count("retargetingOffer") && params_["retargetingOffer"].is_string())
+    if (params_.count("retargetingAccount") && params_["retargetingAccount"].is_string())
     {
-        std::string pla = params_["retargetingOffer"];
+        std::string pla = params_["retargetingAccount"];
         replaceSymbol = boost::make_u32regex("([A-Za-z\\.:\\-\\s_]+;)|([A-Za-z\\.:\\-\\s_]+)");
         pla = boost::u32regex_replace(pla,replaceSymbol,"");
         boost::trim(pla);

@@ -114,7 +114,7 @@ void Core::resultHtml()
         printf("%s\n","/////////////////////////////////////////////////////////////////////////");
     #endif // DEBUG
     nlohmann::json j;
-    j["retargering"] = OffersToJson(vResult);
+    j["retargeringAccount"] = OffersToJson(vResult);
     retHtml = j.dump();
     #ifdef DEBUG
         auto elapsed = std::chrono::high_resolution_clock::now() - start;
@@ -182,7 +182,7 @@ void Core::RISAlgorithm(const Offer::Map &items)
                 }
             }
             if(OutPutCampaignSet.count((*p).second->campaign_id) < (*p).second->unique_by_campaign
-                    && OutPutOfferSet.count((*p).second->id_int) == 0 && !(*p).second->is_recommended)
+                    && OutPutOfferSet.count((*p).second->id_int) == 0)
             { 
                 if(vResult.size() >= params->getCapacity())
                     break;
@@ -192,25 +192,6 @@ void Core::RISAlgorithm(const Offer::Map &items)
                 OutPutCampaignSet.insert((*p).second->campaign_id);
 
             }
-            if ((*p).second->Recommended != "")
-            {
-              if ((*p).second->brending)
-              {
-                  for(auto pr = result.begin(); pr != result.end(); ++pr)
-                    {
-                        if(OutPutOfferSet.count((*pr).second->id_int) == 0 && (*pr).second->is_recommended && (*p).second->campaign_id == (*pr).second->campaign_id )
-                        {
-                            if(vResult.size() >= params->getCapacity())
-                                break;
-                            
-                            vResult.push_back((*pr).second);
-                            OutPutOfferSet.insert((*pr).second->id_int);
-                            OutPutCampaignSet.insert((*pr).second->campaign_id);
-
-                        }
-                    }
-                }
-            }
         }
         passage++;
     }
@@ -219,30 +200,13 @@ void Core::RISAlgorithm(const Offer::Map &items)
         for(auto p = result.begin(); p!=result.end(); ++p)
         {
             if(OutPutCampaignSet.count((*p).second->campaign_id) < (*p).second->unique_by_campaign
-                    && OutPutOfferSet.count((*p).second->id_int) == 0 && !(*p).second->is_recommended)
+                    && OutPutOfferSet.count((*p).second->id_int) == 0)
             {
                 if(vResult.size() >= params->getCapacity())
                     break;
                 
                 vResult.push_back((*p).second);
                 OutPutOfferSet.insert((*p).second->id_int);
-
-            }
-            if ((*p).second->Recommended != "")
-            {
-              for(auto pr = result.begin(); pr != result.end(); ++pr)
-                {
-                    if(OutPutCampaignSet.count((*pr).second->campaign_id) < (*pr).second->unique_by_campaign
-                            && OutPutOfferSet.count((*pr).second->id_int) == 0 && (*pr).second->is_recommended)
-                    {
-                        if(vResult.size() >= params->getCapacity())
-                            break;
-                        
-                        vResult.push_back((*pr).second);
-                        OutPutOfferSet.insert((*pr).second->id_int);
-
-                    }
-                }
 
             }
         }

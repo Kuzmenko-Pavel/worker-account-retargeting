@@ -69,6 +69,159 @@ bool ParentDB::ConnectMainDatabase()
     return true;
 }
 
+void ParentDB::loadRating(const std::string &id)
+{
+    if(!fConnectedToMainDatabase)
+        return;
+    int c = 0;
+    std::unique_ptr<mongo::DBClientCursor> cursor;
+    std::vector<mongo::BSONObj> bsonobjects;
+    std::vector<mongo::BSONObj>::const_iterator x;
+    Kompex::SQLiteStatement *pStmt;
+    pStmt = new Kompex::SQLiteStatement(pdb);
+    mongo::BSONObj f = BSON("adv_int"<<1<<"guid_int"<<1<<"full_rating"<<1);
+    mongo::Query query;
+    if(!id.size())
+    {
+                query = mongo::Query("{\"full_rating\": {\"$exists\": true}}");
+    }
+    else
+    {
+                query =  mongo::Query("{\"adv_int\":"+ id +", \"full_rating\": {\"$exists\": true}}");
+
+        bzero(buf,sizeof(buf));
+        sqlite3_snprintf(sizeof(buf),buf,"DELETE FROM Informer2OfferRating WHERE id_inf=%s;",id.c_str());
+        try
+        {
+            pStmt->SqlStatement(buf);
+        }
+        catch(Kompex::SQLiteException &ex)
+        {
+            logDb(ex);
+        }
+        pStmt->FreeQuery();
+    }
+    
+    try{
+        cursor = monga_main->query(cfg->mongo_main_db_ + ".stats_daily.rating", query, 0,0, &f);
+        unsigned int transCount = 0;
+        pStmt->BeginTransaction();
+        while (cursor->more())
+        {
+            mongo::BSONObj itv = cursor->next();
+            bsonobjects.push_back(itv.copy());
+        }
+        x = bsonobjects.begin();
+        while(x != bsonobjects.end()) {
+            long long guid_int = (*x).getField("guid_int").numberLong();
+            long long adv_int = (*x).getField("adv_int").numberLong();
+            bzero(buf,sizeof(buf));
+            sqlite3_snprintf(sizeof(buf),buf, "INSERT INTO Informer2OfferRating(id_inf,id_ofr,rating) VALUES('%lld','%lld','%f');", adv_int, guid_int, (*x).getField("full_rating").numberDouble());
+            try
+            {
+                pStmt->SqlStatement(buf);
+                ++c;
+            }
+            catch(Kompex::SQLiteException &ex)
+            {
+                logDb(ex);
+            }
+            x++;
+            transCount++;
+            if (transCount % 1000 == 0)
+            {
+                pStmt->CommitTransaction();
+                pStmt->FreeQuery();
+                pStmt->BeginTransaction();
+            }
+        }
+        bsonobjects.clear();
+    }
+    catch(std::exception const &ex)
+    {
+        std::clog<<"["<<pthread_self()<<"]"<<__func__<<" error: "
+                 <<ex.what()
+                 <<" \n"
+                 <<std::endl;
+    }
+    pStmt->CommitTransaction();
+    pStmt->FreeQuery();
+    Log::info("Load inf-rating for %d offers %s",c, query.toString().c_str());
+    delete pStmt;
+}
+
+/** Загружает все товарные предложения из MongoDb */
+void ParentDB::OfferRatingLoad(mongo::Query q_correct)
+{
+    if(!fConnectedToMainDatabase)
+        return;
+
+    Kompex::SQLiteStatement *pStmt;
+    std::vector<mongo::BSONObj> bsonobjects;
+    std::vector<mongo::BSONObj>::const_iterator x;
+    mongo::BSONObj f = BSON("guid"<<1<<"guid_int"<<1<<"full_rating"<<1);
+    auto cursor = monga_main->query(cfg->mongo_main_db_ + ".offer", q_correct, 0, 0, &f);
+
+    pStmt = new Kompex::SQLiteStatement(pdb);
+
+    try
+    {
+        unsigned int transCount = 0;
+        pStmt->BeginTransaction();
+        while (cursor->more())
+        {
+            mongo::BSONObj itv = cursor->next();
+            bsonobjects.push_back(itv.copy());
+        }
+    x = bsonobjects.begin();
+    while(x != bsonobjects.end()) {
+            std::string id = (*x).getStringField("guid");
+            if (id.empty())
+            {
+                continue;
+            }
+
+            bzero(buf,sizeof(buf));
+            sqlite3_snprintf(sizeof(buf),buf,
+    "INSERT OR REPLACE INTO Offer2Rating (id, rating) VALUES(%llu,%f);",
+                             (*x).getField("guid_int").numberLong(),
+                             (*x).getField("full_rating").numberDouble()
+                            );
+
+            try
+            {
+                pStmt->SqlStatement(buf);
+            }
+            catch(Kompex::SQLiteException &ex)
+            {
+                logDb(ex);
+            }
+            x++;
+            transCount++;
+            if (transCount % 1000 == 0)
+            {
+                pStmt->CommitTransaction();
+                pStmt->FreeQuery();
+                pStmt->BeginTransaction();
+            }
+
+        }
+        bsonobjects.clear();
+    }
+    catch(std::exception const &ex)
+    {
+        std::clog<<"["<<pthread_self()<<"]"<<__func__<<" error: "
+                 <<ex.what()
+                 <<" \n"
+                 <<std::endl;
+    }
+
+
+    pStmt->CommitTransaction();
+    pStmt->FreeQuery();
+    delete pStmt;
+}
+
 void ParentDB::OfferLoad(mongo::Query q_correct, mongo::BSONObj &camp)
 {
     if(!fConnectedToMainDatabase)
@@ -212,6 +365,10 @@ void ParentDB::OfferLoad(mongo::Query q_correct, mongo::BSONObj &camp)
     pStmt->FreeQuery();
     delete pStmt;
 
+    mongo::Query q;
+    q = mongo::Query("{ \"campaignId\" : \""+campaignId+"\"}");
+    OfferRatingLoad(q);
+
     Log::info("Loaded %d offers", i);
     if (skipped)
         Log::warn("Offers with empty id or image skipped: %d", skipped);
@@ -264,11 +421,11 @@ void ParentDB::CampaignLoad(const std::string &aCampaignId)
 
     if(!aCampaignId.empty())
     {
-        query = mongo::Query("{\"guid\":\""+ aCampaignId +"\", \"status\" : \"working\",\"showConditions.retargeting\":true}");
+        query = mongo::Query("{\"guid\":\""+ aCampaignId +"\", \"status\" : \"working\",\"showConditions.retargeting\":true,\"showConditions.retargeting_type\":\"account\"}");
     }
     else
     {
-        query = mongo::Query("{\"status\" : \"working\",\"showConditions.retargeting\":true}");
+        query = mongo::Query("{\"status\" : \"working\",\"showConditions.retargeting\":true,\"showConditions.retargeting_type\":\"account\"}");
     }
     CampaignLoad(query);
 }
@@ -335,7 +492,7 @@ void ParentDB::CampaignRemove(const std::string &CampaignId)
     Kompex::SQLiteStatement *pStmt;
     pStmt = new Kompex::SQLiteStatement(pdb);
     bzero(buf,sizeof(buf));
-    sqlite3_snprintf(sizeof(buf),buf,"DELETE FROM Offer WHERE guid='%s';",CampaignId.c_str());
+    sqlite3_snprintf(sizeof(buf),buf,"DELETE FROM Offer WHERE campaign_guid='%s';",CampaignId.c_str());
     try
     {
         pStmt->SqlStatement(buf);
