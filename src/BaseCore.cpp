@@ -1,13 +1,6 @@
-#include "DB.h"
-
 #include <boost/regex.hpp>
-
 #include <sstream>
-
-#include <mongo/util/net/hostandport.h>
-
 #include "../config.h"
-
 #include "Log.h"
 #include "BaseCore.h"
 #include "base64.h"
@@ -38,14 +31,7 @@ std::string BaseCore::toString(AMQPMessage *m)
 {
     unsigned len;
     char *pMes;
-
-#ifdef AMQPCPP_OLD
-    pMes = m->getMessage();
-    len = strlen(pMes);
-#else
     pMes = m->getMessage(&len);
-#endif // AMQPCPP_OLD
-
     return std::string(pMes,len);
 }
 
@@ -66,11 +52,6 @@ bool BaseCore::ProcessMQ()
             while(m->getMessageCount() > -1 && stopCount--)
             {
                 mq_log_.push_back(m->getRoutingKey() + ":" +toString(m) + "</br>");
-                if(cfg->logMQ)
-                {
-                    std::clog<<"mq: cmd:"<<m->getRoutingKey()<<toString(m)<<std::endl;
-                }
-
                 if(m->getRoutingKey() == "campaign.update")
                 {
                     std::string CampaignId = toString(m);

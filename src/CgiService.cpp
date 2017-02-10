@@ -4,7 +4,6 @@
 #include <map>
 #include <chrono>
 
-#include "DB.h"
 #include "Log.h"
 #include "CgiService.h"
 #include "UrlParser.h"
