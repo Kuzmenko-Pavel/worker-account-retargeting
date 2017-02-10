@@ -1,4 +1,7 @@
 #include <boost/regex.hpp>
+#include <bsoncxx/builder/basic/document.hpp>
+#include <bsoncxx/builder/basic/kvp.hpp>
+#include <bsoncxx/types.hpp>
 #include <sstream>
 #include "../config.h"
 #include "Log.h"
