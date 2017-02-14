@@ -217,12 +217,11 @@ std::string BaseCore::Status(const std::string &server_name)
 
     out << "<tr><td>Основная база данных:</td> <td>" <<
         cfg->mongo_main_db_<< "/";
-    out << "<br/>slave_ok = " << (cfg->mongo_main_slave_ok_? "true" : "false");
     out << "<br/>replica set=";
-    if (cfg->mongo_main_set_.empty())
+    if (cfg->mongo_main_url_.empty())
         out << "no set";
     else
-        out << cfg->mongo_main_set_;
+        out << cfg->mongo_main_url_;
     out << "</td></tr>";
     out << "<tr><td>AMQP:</td><td>" << (amqp_? "активен" : "не активен") << "</td></tr>";
     out <<  "<tr><td>Сборка: </td><td>" << __DATE__ << " " << __TIME__<<"</td></tr>";

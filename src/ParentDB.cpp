@@ -117,7 +117,7 @@ void ParentDB::loadRating(const std::string &id)
 }
 
 /** Загружает все товарные предложения из MongoDb */
-void ParentDB::OfferRatingLoad(document &query)
+void ParentDB::OfferRatingLoad(const document &query)
 {
 
     Kompex::SQLiteStatement *pStmt;
@@ -186,46 +186,43 @@ void ParentDB::OfferRatingLoad(document &query)
     delete pStmt;
 }
 
-void ParentDB::OfferLoad(document &query, document &camp)
+void ParentDB::OfferLoad(const document &query, const nlohmann::json &camp)
 {
     Kompex::SQLiteStatement *pStmt;
-    int i = 0,
-    skipped = 0;
+    unsigned int transCount = 0;
+    unsigned int skipped = 0;
     
     pStmt = new Kompex::SQLiteStatement(pdb);
-    //mongo::BSONObj o = camp.getObjectField("showConditions");
-    //mongo::BSONObj f = BSON("guid"<<1<<"image"<<1<<"swf"<<1<<"guid_int"<<1<<"RetargetingID"<<1<<"campaignId_int"<<1<<"campaignId"<<1<<"campaignTitle"<<1
-    //        <<"image"<<1<<"uniqueHits"<<1<<"description"<<1
-    //        <<"url"<<1<<"Recommended"<<1<<"title"<<1);
-    //std::vector<mongo::BSONObj> bsonobjects;
-    //std::vector<mongo::BSONObj>::const_iterator x;
-    //std::string campaignId = camp.getStringField("guid");
-    //auto cursor = monga_main->query(cfg->mongo_main_db_ + ".offer", q_correct, 0, 0, &f);
-    //try{
-    //    unsigned int transCount = 0;
-    //    pStmt->BeginTransaction();
-    //    while (cursor->more())
-    //    {
-    //        mongo::BSONObj itv = cursor->next();
-    //        bsonobjects.push_back(itv.copy());
-    //    }
-    //    x = bsonobjects.begin();
-    //    while(x != bsonobjects.end()) {
-    //        std::string id = (*x).getStringField("guid");
-    //        if (id.empty())
-    //        {
-    //            skipped++;
-    //            continue;
-    //        }
 
-    //        std::string image = (*x).getStringField("image");
-    //        if (image.empty())
-    //        {
-    //            skipped++;
-    //            x++;
-    //            continue;
-    //        }
+    nlohmann::json o = camp["showConditions"];
+    std::string campaignId = camp["guid"].get<std::string>();
+    mongocxx::client conn{mongocxx::uri{cfg->mongo_main_url_}};
+    conn.read_preference(read_preference(read_preference::read_mode::k_secondary_preferred));
+    auto coll = conn[cfg->mongo_main_db_]["offer"];
+    auto cursor = coll.find(query.view());
 
+    std::vector<std::string> items;
+    try{
+        pStmt->BeginTransaction();
+        for (auto &&doc : cursor)
+        {
+               items.push_back(bsoncxx::to_json(doc));
+        }
+        for(auto i : items) {
+            nlohmann::json x = nlohmann::json::parse(i);
+            std::string id = x["guid"].get<std::string>();
+            if (id.empty())
+            {
+                skipped++;
+                continue;
+            }
+
+            std::string image = x["image"].get<std::string>();
+            if (image.empty())
+            {
+                skipped++;
+                continue;
+            }
     //        bzero(buf,sizeof(buf));
     //        sqlite3_snprintf(sizeof(buf),buf,
     //            "INSERT OR REPLACE INTO Offer (\
@@ -292,48 +289,45 @@ void ParentDB::OfferLoad(document &query, document &camp)
     //            o.hasField("UnicImpressionLot") ? o.getIntField("UnicImpressionLot") : 1,
     //            o.getBoolField("html_notification") ? 1 : 0);
     //
-    //        try
-    //        {
-    //            pStmt->SqlStatement(buf);
-    //        }
-    //        catch(Kompex::SQLiteException &ex)
-    //        {
-    //            logDb(ex);
-    //            skipped++;
-    //        }
-    //        transCount++;
-    //        i++;
-    //        x++;
-    //        if (transCount % 1000 == 0)
-    //        {
-    //            pStmt->CommitTransaction();
-    //            pStmt->FreeQuery();
-    //            pStmt->BeginTransaction();
-    //        }
+            try
+            {
+                pStmt->SqlStatement(buf);
+            }
+            catch(Kompex::SQLiteException &ex)
+            {
+                logDb(ex);
+                skipped++;
+            }
+            transCount++;
+            if (transCount % 1000 == 0)
+            {
+                pStmt->CommitTransaction();
+                pStmt->FreeQuery();
+                pStmt->BeginTransaction();
+            }
 
-    //    }
-    //    pStmt->CommitTransaction();
-    //    pStmt->FreeQuery();
-    //    bsonobjects.clear();
-    //}
-    //catch(std::exception const &ex)
-    //{
-    //    std::clog<<"["<<pthread_self()<<"]"<<__func__<<" error: "
-    //             <<ex.what()
-    //             <<" \n"
-    //             <<std::endl;
-    //}
+        }
+        pStmt->CommitTransaction();
+        pStmt->FreeQuery();
+    }
+    catch(std::exception const &ex)
+    {
+        std::clog<<"["<<pthread_self()<<"]"<<__func__<<" error: "
+                 <<ex.what()
+                 <<" \n"
+                 <<std::endl;
+    }
 
-    //pStmt->FreeQuery();
+    pStmt->FreeQuery();
     delete pStmt;
 
-    //mongo::Query q;
-    //q = mongo::Query("{ \"campaignId\" : \""+campaignId+"\"}");
-    //OfferRatingLoad(q);
+    auto filter = document{};
+    filter.append(kvp("campaignId", campaignId ));
+    OfferRatingLoad(filter);
 
-    //Log::info("Loaded %d offers", i);
-    //if (skipped)
-    //    Log::warn("Offers with empty id or image skipped: %d", skipped);
+    Log::info("Loaded %d offers", transCount);
+    if (skipped)
+        Log::warn("Offers with empty id or image skipped: %d", skipped);
 }
 void ParentDB::OfferRemove(const std::string &id)
 {
@@ -379,68 +373,81 @@ void ParentDB::logDb(const Kompex::SQLiteException &ex) const
 //==================================================================================
 void ParentDB::CampaignLoad(const std::string &aCampaignId)
 {
-   // mongo::Query query;
+    auto filter = document{};
 
-   // if(!aCampaignId.empty())
-   // {
-   //     query = mongo::Query("{\"guid\":\""+ aCampaignId +"\", \"status\" : \"working\",\"showConditions.retargeting\":true,\"showConditions.retargeting_type\":\"account\"}");
-   // }
-   // else
-   // {
-   //     query = mongo::Query("{\"status\" : \"working\",\"showConditions.retargeting\":true,\"showConditions.retargeting_type\":\"account\"}");
-   // }
-   // CampaignLoad(query);
+    if(!aCampaignId.empty())
+    {
+        filter.append(
+                     kvp("showConditions.retargeting", bsoncxx::types::b_bool{true}),
+                      kvp("showConditions.retargeting_type", "account"),
+                      kvp("status", "working"),
+                      kvp("guid", aCampaignId));
+    }
+    else
+    {
+        filter.append(
+                     kvp("showConditions.retargeting", bsoncxx::types::b_bool{true}),
+                      kvp("showConditions.retargeting_type", "account"),
+                      kvp("status", "working")
+                      );
+    }
+    CampaignLoad(filter);
 }
 /** \brief  Закгрузка всех рекламных кампаний из базы данных  Mongo
 
  */
 //==================================================================================
-void ParentDB::CampaignLoad(document &query)
+void ParentDB::CampaignLoad(const document &query)
 {
-    //std::unique_ptr<mongo::DBClientCursor> cursor;
-    //int i = 0;
+    int count = 0;
+    mongocxx::client conn{mongocxx::uri{cfg->mongo_main_url_}};
+    conn.read_preference(read_preference(read_preference::read_mode::k_secondary_preferred));
+    auto coll = conn[cfg->mongo_main_db_]["campaign"];
+    auto cursor = coll.find(query.view());
 
-    //cursor = monga_main->query(cfg->mongo_main_db_ +".campaign", q_correct);
-    //try{
-    //while (cursor->more())
-    //{
-    //    mongo::BSONObj x = cursor->next();
-    //    std::string id = x.getStringField("guid");
-    //    if (id.empty())
-    //    {
-    //        Log::warn("Campaign with empty id skipped");
-    //        continue;
-    //    }
+    std::vector<std::string> items;
+    try{
+        for (auto &&doc : cursor)
+        {
+               items.push_back(bsoncxx::to_json(doc));
+        }
+        for(auto i : items) {
+            nlohmann::json x = nlohmann::json::parse(i);
+            std::string id = x["guid"].get<std::string>();
+            if (id.empty())
+            {
+                Log::warn("Campaign with empty id skipped");
+                continue;
+            }
 
-    //    std::string status = x.getStringField("status");
-    //    
-    //    CampaignRemove(id);
+            std::string status = x["status"].get<std::string>();
+            
+            CampaignRemove(id);
 
-    //    if (status != "working")
-    //    {
-    //        Log::info("Campaign is hold: %s", id.c_str());
-    //        continue;
-    //    }
+            if (status != "working")
+            {
+                Log::info("Campaign is hold: %s", id.c_str());
+                continue;
+            }
 
-    //    //------------------------Create CAMP-----------------------
-    //    //Загрузили все предложения
-    //    mongo::Query q;
-    //    q = mongo::Query("{\"campaignId\" : \""+ id + "\"}");
-    //    OfferLoad(q, x);
-    //    Log::info("Loaded campaign: %s", id.c_str());
-    //    i++;
+            //------------------------Create CAMP-----------------------
+            //Загрузили все предложения
+            auto filter = document{};
+            count++;
+            filter.append(kvp("campaignId", id ));
+            OfferLoad(filter, x);
+            Log::info("Loaded campaign: %s", id.c_str());
+        }//endfor
+    }
+    catch(std::exception const &ex)
+    {
+        std::clog<<"["<<pthread_self()<<"]"<<__func__<<" error: "
+                 <<ex.what()
+                 <<" \n"
+                 <<std::endl;
+    }
 
-    //}//while
-    //}
-    //catch(std::exception const &ex)
-    //{
-    //    std::clog<<"["<<pthread_self()<<"]"<<__func__<<" error: "
-    //             <<ex.what()
-    //             <<" \n"
-    //             <<std::endl;
-    //}
-
-    //Log::info("Loaded %d campaigns",i); 
+    Log::info("Loaded %d campaigns",count); 
 }
 
 
