@@ -21,6 +21,7 @@
 #include "Offer.h"
 
 using bsoncxx::builder::basic::document;
+using bsoncxx::builder::basic::sub_document;
 using bsoncxx::builder::basic::kvp;
 using mongocxx::options::find;
 using mongocxx::read_preference;
@@ -39,150 +40,180 @@ ParentDB::~ParentDB()
 
 void ParentDB::loadRating(const std::string &id)
 {
-    int c = 0;
-    //std::unique_ptr<mongo::DBClientCursor> cursor;
-    //std::vector<mongo::BSONObj> bsonobjects;
-    //std::vector<mongo::BSONObj>::const_iterator x;
-    //Kompex::SQLiteStatement *pStmt;
-    //pStmt = new Kompex::SQLiteStatement(pdb);
-    //mongo::BSONObj f = BSON("adv_int"<<1<<"guid_int"<<1<<"full_rating"<<1);
-    //mongo::Query query;
-    //if(!id.size())
-    //{
-    //            query = mongo::Query("{\"full_rating\": {\"$exists\": true}}");
-    //}
-    //else
-    //{
-    //            query =  mongo::Query("{\"adv_int\":"+ id +", \"full_rating\": {\"$exists\": true}}");
-
-    //    bzero(buf,sizeof(buf));
-    //    sqlite3_snprintf(sizeof(buf),buf,"DELETE FROM Informer2OfferRating WHERE id_inf=%s;",id.c_str());
-    //    try
-    //    {
-    //        pStmt->SqlStatement(buf);
-    //    }
-    //    catch(Kompex::SQLiteException &ex)
-    //    {
-    //        logDb(ex);
-    //    }
-    //    pStmt->FreeQuery();
-    //}
-    //
-    //try{
-    //    cursor = monga_main->query(cfg->mongo_main_db_ + ".stats_daily.rating", query, 0,0, &f);
-    //    unsigned int transCount = 0;
-    //    pStmt->BeginTransaction();
-    //    while (cursor->more())
-    //    {
-    //        mongo::BSONObj itv = cursor->next();
-    //        bsonobjects.push_back(itv.copy());
-    //    }
-    //    x = bsonobjects.begin();
-    //    while(x != bsonobjects.end()) {
-    //        long long guid_int = (*x).getField("guid_int").numberLong();
-    //        long long adv_int = (*x).getField("adv_int").numberLong();
-    //        bzero(buf,sizeof(buf));
-    //        sqlite3_snprintf(sizeof(buf),buf, "INSERT INTO Informer2OfferRating(id_inf,id_ofr,rating) VALUES('%lld','%lld','%f');", adv_int, guid_int, (*x).getField("full_rating").numberDouble());
-    //        try
-    //        {
-    //            pStmt->SqlStatement(buf);
-    //            ++c;
-    //        }
-    //        catch(Kompex::SQLiteException &ex)
-    //        {
-    //            logDb(ex);
-    //        }
-    //        x++;
-    //        transCount++;
-    //        if (transCount % 1000 == 0)
-    //        {
-    //            pStmt->CommitTransaction();
-    //            pStmt->FreeQuery();
-    //            pStmt->BeginTransaction();
-    //        }
-    //    }
-    //    bsonobjects.clear();
-    //}
-    //catch(std::exception const &ex)
-    //{
-    //    std::clog<<"["<<pthread_self()<<"]"<<__func__<<" error: "
-    //             <<ex.what()
-    //             <<" \n"
-    //             <<std::endl;
-    //}
-    //pStmt->CommitTransaction();
-    //pStmt->FreeQuery();
-    //Log::info("Load inf-rating for %d offers %s",c, query.toString().c_str());
-    //delete pStmt;
+    mongocxx::client conn{mongocxx::uri{cfg->mongo_main_url_}};
+    conn.read_preference(read_preference(read_preference::read_mode::k_secondary_preferred));
+    auto coll = conn[cfg->mongo_main_db_]["stats_daily.rating"];
+    auto filter = document{};
+    Kompex::SQLiteStatement *pStmt;
+    if(!id.size())
+    {
+        filter.append(kvp("full_rating",
+                         [](sub_document subdoc) {
+                                subdoc.append(kvp("$exists", bsoncxx::types::b_bool{true}));
+                                }));
+    }
+    else
+    {
+        filter.append(kvp("full_rating",
+                    [](sub_document subdoc) {
+                    subdoc.append(kvp("$exists", bsoncxx::types::b_bool{true}));
+                    }),
+                kvp("adv_int", id));
+        pStmt = new Kompex::SQLiteStatement(pdb);
+        bzero(buf,sizeof(buf));
+        sqlite3_snprintf(sizeof(buf),buf,"DELETE FROM Informer2OfferRating WHERE id_inf=%s;",id.c_str());
+        try
+        {
+            pStmt->SqlStatement(buf);
+        }
+        catch(Kompex::SQLiteException &ex)
+        {
+            logDb(ex);
+        }
+        pStmt->FreeQuery();
+        delete pStmt;
+    }
+    
+        auto cursor = coll.find(filter.view());
+        pStmt = new Kompex::SQLiteStatement(pdb);
+        unsigned int transCount = 0;
+        int c = 0;
+        pStmt->BeginTransaction();
+        std::vector<std::string> items;
+        try{
+            for (auto &&doc : cursor)
+            {
+               items.push_back(bsoncxx::to_json(doc));
+            }
+            for(auto i : items) {
+                nlohmann::json x = nlohmann::json::parse(i);
+                long long guid_int = x["guid_int"].get<long long>();
+                long long adv_int =  x["adv_int"].get<long long>();
+                bzero(buf,sizeof(buf));
+                sqlite3_snprintf(sizeof(buf),buf, "INSERT INTO Informer2OfferRating(id_inf,id_ofr,rating) VALUES('%lld','%lld','%f');", adv_int, guid_int, x["full_rating"].get<float>());
+                try
+                {
+                    pStmt->SqlStatement(buf);
+                    ++c;
+                }
+                catch(Kompex::SQLiteException &ex)
+                {
+                    logDb(ex);
+                    #ifdef DEBUG
+                    printf("%s\n","--------------------------------------------");
+                    printf("%s\n","INSERT INTO Informer2OfferRating");
+                    #endif // DEBUG
+                }
+                transCount++;
+                if (transCount % 1000 == 0)
+                {
+                    pStmt->CommitTransaction();
+                    pStmt->FreeQuery();
+                    pStmt->BeginTransaction();
+                }
+        }
+    }
+    catch(std::exception const &ex)
+    {
+        std::clog<<"["<<pthread_self()<<"]"<<__func__<<" error: "
+                 <<ex.what()
+                 <<" \n"
+                 <<std::endl;
+    }
+    pStmt->CommitTransaction();
+    pStmt->FreeQuery();
+    Log::info("Load inf-rating for %d offers",c);
+    delete pStmt;
 }
 
 /** Загружает все товарные предложения из MongoDb */
 void ParentDB::OfferRatingLoad(const document &query)
 {
+   Kompex::SQLiteStatement *pStmt;
+   mongocxx::client conn{mongocxx::uri{cfg->mongo_main_url_}};
+   conn.read_preference(read_preference(read_preference::read_mode::k_secondary_preferred));
+   auto coll = conn[cfg->mongo_main_db_]["offer"];
+   auto cursor = coll.find(query.view());
+   long long long_id = 0;
+   pStmt = new Kompex::SQLiteStatement(pdb);
+   std::vector<std::string> items;
+   unsigned int transCount = 0;
+   pStmt->BeginTransaction();
+   try{
+         for (auto &&doc : cursor)
+         {
+            items.push_back(bsoncxx::to_json(doc));
+         }
+         for(auto i : items) {
+             nlohmann::json x = nlohmann::json::parse(i);
 
-    Kompex::SQLiteStatement *pStmt;
-    //std::vector<mongo::BSONObj> bsonobjects;
-    //std::vector<mongo::BSONObj>::const_iterator x;
-    //mongo::BSONObj f = BSON("guid"<<1<<"guid_int"<<1<<"full_rating"<<1);
-    //auto cursor = monga_main->query(cfg->mongo_main_db_ + ".offer", q_correct, 0, 0, &f);
+            std::string id = x["guid"].get<std::string>();
+            if (id.empty())
+            {
+                continue;
+            }
+            long_id = x["guid_int"].get<long long>();
+            bzero(buf,sizeof(buf));
+            sqlite3_snprintf(sizeof(buf),buf,"SELECT id FROM Offer WHERE id=%lld;", long_id);
+            bool find = false; 
+            try
+            {
+                pStmt->Sql(buf);
+                while(pStmt->FetchRow())
+                {
+                    find = true;
+                    break;
+                }
+                pStmt->FreeQuery();
+            }
+            catch(Kompex::SQLiteException &ex)
+            {
+                logDb(ex);
+            }
+            if (find)
+            {
+                bzero(buf,sizeof(buf));
+                sqlite3_snprintf(sizeof(buf),buf,
+        "INSERT OR REPLACE INTO Offer2Rating (id, rating) VALUES(%llu,%f);",
+                                 long_id,
+                                 x["full_rating"].get<float>()
+                                );
 
-    //pStmt = new Kompex::SQLiteStatement(pdb);
+                try
+                {
+                    pStmt->SqlStatement(buf);
+                }
+                catch(Kompex::SQLiteException &ex)
+                {
+                    #ifdef DEBUG
+                    printf("%s\n","--------------------------------------------");
+                    printf("%s\n","INSERT OR REPLACE INTO Offer2Rating");
+                    #endif // DEBUG
+                    logDb(ex);
+                    pStmt->FreeQuery();
+                }
+                transCount++;
+                if (transCount % 1000 == 0)
+                {
+                    pStmt->CommitTransaction();
+                    pStmt->FreeQuery();
+                    pStmt->BeginTransaction();
+                }
+            }
 
-    //try
-    //{
-    //    unsigned int transCount = 0;
-    //    pStmt->BeginTransaction();
-    //    while (cursor->more())
-    //    {
-    //        mongo::BSONObj itv = cursor->next();
-    //        bsonobjects.push_back(itv.copy());
-    //    }
-    //x = bsonobjects.begin();
-    //while(x != bsonobjects.end()) {
-    //        std::string id = (*x).getStringField("guid");
-    //        if (id.empty())
-    //        {
-    //            continue;
-    //        }
-
-    //        bzero(buf,sizeof(buf));
-    //        sqlite3_snprintf(sizeof(buf),buf,
-    //"INSERT OR REPLACE INTO Offer2Rating (id, rating) VALUES(%llu,%f);",
-    //                         (*x).getField("guid_int").numberLong(),
-    //                         (*x).getField("full_rating").numberDouble()
-    //                        );
-
-    //        try
-    //        {
-    //            pStmt->SqlStatement(buf);
-    //        }
-    //        catch(Kompex::SQLiteException &ex)
-    //        {
-    //            logDb(ex);
-    //        }
-    //        x++;
-    //        transCount++;
-    //        if (transCount % 1000 == 0)
-    //        {
-    //            pStmt->CommitTransaction();
-    //            pStmt->FreeQuery();
-    //            pStmt->BeginTransaction();
-    //        }
-
-    //    }
-    //    bsonobjects.clear();
-    //}
-    //catch(std::exception const &ex)
-    //{
-    //    std::clog<<"["<<pthread_self()<<"]"<<__func__<<" error: "
-    //             <<ex.what()
-    //             <<" \n"
-    //             <<std::endl;
-    //}
+        }
+    }
+    catch(std::exception const &ex)
+    {
+        std::clog<<"["<<pthread_self()<<"]"<<__func__<<" error: "
+                 <<ex.what()
+                 <<" \n"
+                 <<std::endl;
+    }
 
 
-    //pStmt->CommitTransaction();
-    //pStmt->FreeQuery();
+    pStmt->CommitTransaction();
+    pStmt->FreeQuery();
     delete pStmt;
 }
 
@@ -223,72 +254,72 @@ void ParentDB::OfferLoad(const document &query, const nlohmann::json &camp)
                 skipped++;
                 continue;
             }
-    //        bzero(buf,sizeof(buf));
-    //        sqlite3_snprintf(sizeof(buf),buf,
-    //            "INSERT OR REPLACE INTO Offer (\
-    //            id,\
-    //            guid,\
-    //            retid,\
-    //            campaignId,\
-    //            image,\
-    //            uniqueHits,\
-    //            brending,\
-    //            description,\
-    //            url,\
-    //            Recommended,\
-    //            recomendet_type,\
-    //            recomendet_count,\
-    //            title,\
-    //            campaign_guid,\
-    //            social,\
-    //            offer_by_campaign_unique,\
-    //            account,\
-    //            target,\
-    //            UnicImpressionLot,\
-    //            html_notification\
-    //            )\
-    //            VALUES(\
-    //                    %llu,\
-    //                    '%q',\
-    //                    '%q',\
-    //                    %llu,\
-    //                    '%q',\
-    //                    %d,\
-    //                    %d,\
-    //                    '%q',\
-    //                    '%q',\
-    //                    '%q',\
-    //                    '%q',\
-    //                    %d,\
-    //                    '%q',\
-    //                    '%q',\
-    //                    %d,\
-    //                    %d,\
-    //                    '%q',\
-    //                    '%q',\
-    //                    %d,\
-    //                    %d);",
-    //            (*x).getField("guid_int").numberLong(),
-    //            id.c_str(),
-    //            (*x).getStringField("RetargetingID"),
-    //            (*x).getField("campaignId_int").numberLong(),
-    //            (*x).getStringField("image"),
-    //            (*x).getIntField("uniqueHits"),
-    //            o.getBoolField("brending") ? 1 : 0,
-    //            (*x).getStringField("description"),
-    //            (*x).getStringField("url"),
-    //            (*x).getStringField("Recommended"),
-    //             o.hasField("recomendet_type") ? o.getStringField("recomendet_type") : "all",
-    //             o.hasField("recomendet_count") ? o.getIntField("recomendet_count") : 10,
-    //            (*x).getStringField("title"),
-    //            campaignId.c_str(),
-    //            camp.getBoolField("social") ? 1 : 0,
-    //            o.hasField("offer_by_campaign_unique") ? o.getIntField("offer_by_campaign_unique") : 1,
-    //            camp.getStringField("account"),
-    //            o.getStringField("target"),
-    //            o.hasField("UnicImpressionLot") ? o.getIntField("UnicImpressionLot") : 1,
-    //            o.getBoolField("html_notification") ? 1 : 0);
-    //
+            bzero(buf,sizeof(buf));
+            sqlite3_snprintf(sizeof(buf),buf,
+                "INSERT OR REPLACE INTO Offer (\
+                id,\
+                guid,\
+                retid,\
+                campaignId,\
+                image,\
+                uniqueHits,\
+                brending,\
+                description,\
+                url,\
+                Recommended,\
+                recomendet_type,\
+                recomendet_count,\
+                title,\
+                campaign_guid,\
+                social,\
+                offer_by_campaign_unique,\
+                account,\
+                target,\
+                UnicImpressionLot,\
+                html_notification\
+                )\
+                VALUES(\
+                        %llu,\
+                        '%q',\
+                        '%q',\
+                        %llu,\
+                        '%q',\
+                        %d,\
+                        %d,\
+                        '%q',\
+                        '%q',\
+                        '%q',\
+                        '%q',\
+                        %d,\
+                        '%q',\
+                        '%q',\
+                        %d,\
+                        %d,\
+                        '%q',\
+                        '%q',\
+                        %d,\
+                        %d);",
+                x["guid_int"].get<long long>(),
+                id.c_str(),
+                x["RetargetingID"].get<std::string>().c_str(),
+                x["campaignId_int"].get<long long>(),
+                image.c_str(),
+                x["uniqueHits"].get<int>(),
+                o["brending"].get<bool>() ? 1 : 0,
+                x["description"].get<std::string>().c_str(),
+                x["url"].get<std::string>().c_str(),
+                x["Recommended"].get<std::string>().c_str(),
+                 o["recomendet_type"].is_string() ? o["recomendet_type"].get<std::string>().c_str() : "all",
+                 o["recomendet_count"].is_number() ? o["recomendet_count"].get<int>() : 10,
+                x["title"].get<std::string>().c_str(),
+                campaignId.c_str(),
+                camp["social"].get<bool>() ? 1 : 0,
+                o["offer_by_campaign_unique"].is_number() ? o["offer_by_campaign_unique"].get<int>() : 1,
+                camp["account"].get<std::string>().c_str(),
+                o["target"].get<std::string>().c_str(),
+                o["UnicImpressionLot"].is_number() ? o["UnicImpressionLot"].get<int>() : 1,
+                o["html_notification"].get<bool>() ? 1 : 0);
+    
             try
             {
                 pStmt->SqlStatement(buf);

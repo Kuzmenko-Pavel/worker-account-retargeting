@@ -14,7 +14,7 @@
     <children>1</children>
 
     <!--путь к очереди сообщений-->
-    <mq_path>worker:worker@rg.yottos.com/worker</mq_path>
+    <mq_path>test-worker:test-worker@srv-4.yottos.com/test-worker</mq_path>
 
     <!--путь к фалу базы данных sqlite или :memory:-->
     <sqlite>
@@ -159,23 +159,10 @@
 <mongo>
     <!--Параметры подключения к основной базе данных-->
     <main>
-        <!--Адрес сервера баз данных-->
-        <host>srv-2.yottos.com:27018</host>
-        <host>srv-9.yottos.com:27018</host>
-        <host>srv-1.yottos.com:27018</host>
-        <!--Название базы данных-->
+        <url>mongodb://srv-5.yottos.com:27018,srv-5.yottos.com:27019,srv-5.yottos.com:27020?replicaSet=vsrv</url>
         <db>getmyad_db</db>
         <!--Название группы реплик (если база данных находится в Replica Set)-->
         <!--set></set-->
-        <set>vsrv</set>
-        <!--Может ли сервис подключаться к slave серверам базам данных.
-        Это балансирует нагрузку в режиме только для чтения, но появляется
-        вероятность чтения не самых свежих данных (разница от мастера до
-        нескольких секунд).-->
-        <slave>1</slave>
-
-        <login></login>
-        <passwd></passwd>
     </main>
     <!--Параметры подключения к базе данных журнала-->
     <log>
